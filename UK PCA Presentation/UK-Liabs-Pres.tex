@@ -1,0 +1,425 @@
+\PassOptionsToPackage{unicode=true}{hyperref} % options for packages loaded elsewhere
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[ignorenonframetext,]{beamer}
+\usepackage{pgfpages}
+\setbeamertemplate{caption}[numbered]
+\setbeamertemplate{caption label separator}{: }
+\setbeamercolor{caption name}{fg=normal text.fg}
+\beamertemplatenavigationsymbolsempty
+% Prevent slide breaks in the middle of a paragraph:
+\widowpenalties 1 10000
+\raggedbottom
+\setbeamertemplate{part page}{
+\centering
+\begin{beamercolorbox}[sep=16pt,center]{part title}
+  \usebeamerfont{part title}\insertpart\par
+\end{beamercolorbox}
+}
+\setbeamertemplate{section page}{
+\centering
+\begin{beamercolorbox}[sep=12pt,center]{part title}
+  \usebeamerfont{section title}\insertsection\par
+\end{beamercolorbox}
+}
+\setbeamertemplate{subsection page}{
+\centering
+\begin{beamercolorbox}[sep=8pt,center]{part title}
+  \usebeamerfont{subsection title}\insertsubsection\par
+\end{beamercolorbox}
+}
+\AtBeginPart{
+  \frame{\partpage}
+}
+\AtBeginSection{
+  \ifbibliography
+  \else
+    \frame{\sectionpage}
+  \fi
+}
+\AtBeginSubsection{
+  \frame{\subsectionpage}
+}
+\usepackage{lmodern}
+\usepackage{amssymb,amsmath}
+\usepackage{ifxetex,ifluatex}
+\usepackage{fixltx2e} % provides \textsubscript
+\ifnum 0\ifxetex 1\fi\ifluatex 1\fi=0 % if pdftex
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provides euro and other symbols
+\else % if luatex or xelatex
+  \usepackage{unicode-math}
+  \defaultfontfeatures{Ligatures=TeX,Scale=MatchLowercase}
+\fi
+% use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+% use microtype if available
+\IfFileExists{microtype.sty}{%
+\usepackage[]{microtype}
+\UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\IfFileExists{parskip.sty}{%
+\usepackage{parskip}
+}{% else
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt plus 2pt minus 1pt}
+}
+\usepackage{hyperref}
+\hypersetup{
+            pdftitle={A PCA Approach to Hedging UK Pension Liabilities},
+            pdfauthor={John St-Hill},
+            pdfborder={0 0 0},
+            breaklinks=true}
+\urlstyle{same}  % don't use monospace font for urls
+\newif\ifbibliography
+\usepackage{longtable,booktabs}
+\usepackage{caption}
+% These lines are needed to make table captions work with longtable:
+\makeatletter
+\def\fnum@table{\tablename~\thetable}
+\makeatother
+\usepackage{graphicx,grffile}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+\setlength{\emergencystretch}{3em}  % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{0}
+
+% set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+
+
+\title{A PCA Approach to Hedging UK Pension Liabilities}
+\author{John St-Hill}
+\date{06/10/2020}
+
+\begin{document}
+\frame{\titlepage}
+
+\begin{frame}{UK DB Pension Market}
+\protect\hypertarget{uk-db-pension-market}{}
+
+\begin{itemize}
+\tightlist
+\item
+  10 Million Members
+\item
+  5436 DB Schemes left in UK (7751 in 2006)
+\item
+  £1.6tr in UK Pension Liabilities
+
+  \begin{itemize}
+  \tightlist
+  \item
+    26\% Schemes have more than £100m Liabilities
+  \item
+    5\% Schemes have more than £1bn Liabilities
+  \end{itemize}
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{DB Pension Scheme Risks}
+\protect\hypertarget{db-pension-scheme-risks}{}
+
+\begin{itemize}
+\tightlist
+\item
+  Interest Rate
+\item
+  Inflation
+\item
+  Longevity
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{History of Pension Fund Hedging}
+\protect\hypertarget{history-of-pension-fund-hedging}{}
+
+\begin{itemize}
+\tightlist
+\item
+  Pre - 2000: Immunization:(Matched Duration, Asset Convexity
+  \textgreater{} Liability Convexity)
+
+  \begin{itemize}
+  \tightlist
+  \item
+    ignores cost of convexity
+  \item
+    assumes parallel curve moves
+  \end{itemize}
+\item
+  2000 - 2020: PV01, IE01 buckets across curve
+
+  \begin{itemize}
+  \tightlist
+  \item
+    ignores intra bucket volatility
+  \item
+    hedge is more complex
+  \end{itemize}
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{Current Approaches}
+\protect\hypertarget{current-approaches}{}
+
+\begin{itemize}
+\tightlist
+\item
+  Using the whole curve to discount liabilities
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Spurious accuracy
+  \end{itemize}
+\item
+  Picking representative points on the curve
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Choice of points is arbitrary
+  \end{itemize}
+\item
+  Liability Benchmark Portfolio (LBP)
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Convexity mismatch
+  \item
+    Credit spreads
+  \end{itemize}
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{PCA Approach}
+\protect\hypertarget{pca-approach}{}
+
+\begin{itemize}
+\tightlist
+\item
+  Assume that linear factor structure exists
+\item
+  Assume factor loadings are stable
+\item
+  Infer factors from data
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{UK Yield Curve}
+\protect\hypertarget{uk-yield-curve}{}
+
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/chgYieldCurve-1.pdf}
+
+\end{frame}
+
+\begin{frame}{Yield Correlation}
+\protect\hypertarget{yield-correlation}{}
+
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/exploredata-1.pdf}
+
+\begin{itemize}
+\tightlist
+\item
+  Darkest on diagonal and lightest in top right corner
+\item
+  Adjacent maturities should have higher correlations
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{Interpretting the PCAs}
+\protect\hypertarget{interpretting-the-pcas}{}
+
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/factorLoadings-1.pdf}
+
+\end{frame}
+
+\begin{frame}{Principal Component Analysis}
+\protect\hypertarget{principal-component-analysis}{}
+
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/explainedRisk-1.pdf}
+
+\begin{longtable}[]{@{}lll@{}}
+\toprule
+PCA 1 & PCA 2 & PCA 3\tabularnewline
+\midrule
+\endhead
+99.6 & 0.35 & 0.04\tabularnewline
+\bottomrule
+\end{longtable}
+
+\end{frame}
+
+\begin{frame}{Typical UK DB Scheme}
+\protect\hypertarget{typical-uk-db-scheme}{}
+
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/liabCashFlowSimulation-1.pdf}
+
+\end{frame}
+
+\begin{frame}{Building the hedge}
+\protect\hypertarget{building-the-hedge}{}
+
+\begin{itemize}
+\tightlist
+\item
+  We know the factor loadings of the Scheme
+\item
+  We know the factor loadings of each point on the yield curve
+  \(\implies\) we know factor loading of each bond/swap
+\item
+  Back out how much of each bond/swap we need to hedge the Scheme
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{How have PCAs behaved}
+\protect\hypertarget{how-have-pcas-behaved}{}
+
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/PCAs-1.pdf}
+
+\end{frame}
+
+\begin{frame}{Trade Ideas}
+\protect\hypertarget{trade-ideas}{}
+
+As at 2020-09-30
+
+\begin{longtable}[]{@{}llll@{}}
+\toprule
+. & PCA 1 & PCA 2 & PCA 3\tabularnewline
+\midrule
+\endhead
+Value & -6.231 & -1.116 & -0.433\tabularnewline
+SDs from Mean & 2.1 & -1.7 & -2.2\tabularnewline
+\bottomrule
+\end{longtable}
+
+\end{frame}
+
+\begin{frame}{Selecting an Asset to trade}
+\protect\hypertarget{selecting-an-asset-to-trade}{}
+
+\begin{itemize}
+\tightlist
+\item
+  Assume that you want to trade PCA2
+\end{itemize}
+
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/showdrift-1.pdf}
+
+\end{frame}
+
+\begin{frame}{Forecasting}
+\protect\hypertarget{forecasting}{}
+
+\begin{itemize}
+\tightlist
+\item
+  Idea 1: Fit Orstein Uhlenbeck (Vasicek) Process
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Huggins and Schaller approach
+  \item
+    assumes the only information that is useful in calculating the
+    change is the current value.
+  \item
+    no trending away from mean
+  \end{itemize}
+\item
+  Idea 2: Fit Auto Regressive model, AR(p)
+
+  \begin{itemize}
+  \tightlist
+  \item
+    somewhat of a Blackbox
+  \item
+    allows for trending away from mean
+  \item
+    need to infer the order p, of the AR model
+  \end{itemize}
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{AR model}
+\protect\hypertarget{ar-model}{}
+
+This chart shows the expected path of the PCA 2. The chart below fits an
+AR model.
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/showfuturepathDemo,-1.pdf}
+
+\end{frame}
+
+\begin{frame}{Vasicek Model}
+\protect\hypertarget{vasicek-model}{}
+
+SDE for Vasicek model : \(dr_{t}= \kappa (\theta - r_t) + \sigma dW_t\)
+\includegraphics{UK-Liabs-Pres_files/figure-beamer/fitVasicekmodel-1.pdf}
+
+\end{frame}
+
+\begin{frame}{Conclusions}
+\protect\hypertarget{conclusions}{}
+
+\begin{itemize}
+\tightlist
+\item
+  Benefits
+
+  \begin{itemize}
+  \tightlist
+  \item
+    We can simplify the hedge
+  \item
+    We can identify tactical trading opportunities
+  \item
+    Challenge trade ideas after execution systematically
+  \end{itemize}
+\item
+  Limitations/Further Research
+
+  \begin{itemize}
+  \tightlist
+  \item
+    explaining approach to Trustees
+  \item
+    stability of factor loadings
+  \item
+    Converting ZC to real bonds
+  \end{itemize}
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{Dataset}
+\protect\hypertarget{dataset}{}
+
+Source: Bank of England daily nominal Zero Coupon Yields estimated using
+Nelsen Siebold Method.
+\url{https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/latest-yield-curve-data.zip}
+
+\end{frame}
+
+\end{document}

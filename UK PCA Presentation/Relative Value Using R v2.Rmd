@@ -1,0 +1,512 @@
+---
+title: "PCA Analysis"
+author: "John St-Hill"
+date: "12/06/2020"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(include = TRUE)
+knitr::opts_chunk$set(comment = NA)
+knitr::opts_chunk$set(message=FALSE)
+knitr::opts_chunk$set(warning=FALSE)
+rm(helperfilepath,dataload,z,nrz,ncz,nbcol,color,zfacet,facetcol,collabels,rates.df,minday,maxday,pca,qtrpoint,endpoint,number.of.observations,rolling.correlation.period,number.of.correls,rolling.correlation.matrix,ChartTitle ) # delete used objects
+
+require(xts)
+require(lubridate)
+require(forecast)
+require(readxl)
+require(prophet)
+
+#require(fable)
+#require(fabletools)
+
+colours.for.barcharts=c("red","blue","green","grey","pink","yellow","light blue","light green","black","dark blue","dark green")
+
+
+```
+
+## Introduction
+
+Principal Component Analysis is a technique for identifying common factors that explain the behaviour of data.
+
+When used to understand financial markets the process is as follows:
+
+* Calculate a covariance matrix from the time series of observations 
+* Transform the covariance matrix 'A' into a set of orthogonal vectors. Find $Ax = \lambda x$
+* Use the new matrix to express the original time series in Eigen space
+* Look for patterns in the Eigenspace time series
+* Test for mean reversion in the pattern
+
+The implicit assumptions when using this technique are:
+
+* The sensitivity of the instruments to the factors are stable over the __estimation period__
+* The sensitivity of the instruments to the factors are stable over the __forecast period__
+* The market is characterised by linear combination of factors.
+
+
+```{r, include = FALSE}
+#This sets the place to get time series data from
+dataDirectory <- "/media/john/6E34B3A529A1D545/Data"
+```
+
+## Data
+
+The data for the analysis is stored in "`r dataDirectory`"
+
+
+
+```{r, include = FALSE, comment = NA}
+# The code uses various helper functions
+# These were updated from my first versions
+
+helperfilepath <- "/media/john/6E34B3A529A1D545/Tools/R Programs/functions 2020 06.r"
+source(helperfilepath)
+```
+
+The user defined functions must be run first. These are stored in "`r helperfilepath`"
+
+```{r loaddata, echo=FALSE, include= FALSE}
+#This runs the script to load the data
+reloadHistoricMonths=FALSE
+dataload <- paste(dataDirectory,"/","data preprocessing scripts.r",sep="")
+action <- "downloadallrealdata"
+#action <- "downloadallnominaldata"
+#action <-"downloadallinflationdata"
+source(dataload)
+```
+This analysis focusses on `r action`
+
+
+## Data Exploration
+The correllogram shows which instruments tend to have the greatest correlation. The colours represent the correlation of the variables
+```{r exploredata, echo=FALSE,include=TRUE}
+
+z<-cor(rates.ts.all,use="pairwise.complete.obs")
+library(corrplot)
+corrplot(z,method="shade")
+```
+
+If there are less than 15 variables then we plot each variable versus the other variables. Straight lines indicate linear relationships but be aware of the risk of strongly trending time series. The PCA should isolate this if it is present in the data and present it as a dominant first factor. However, this will tend to make the remaining eigen values much smaller and consequently less stable.
+
+```{r plotrates}
+if(dim(rates.ts.all)[2]<15){
+plot(rates.ts.all) # This will fail if you have too many variables.
+}
+```
+
+<!--- The Covariance surface shows which instruments have the highest covariance. This is particularly useful in yield curve analysis because different maturities have different volatilities.
+--->
+
+```{r covariances_chart,include = FALSE, echo = FALSE}
+
+
+if(1==2){
+par(bg = "white")
+#x <- seq(-1.95, 1.95, length = 30)
+#y <- seq(-1.95, 1.95, length = 35)
+# z <- outer(x, y, function(a, b) a*b^2)
+cov(rates.ts.all)
+z<- cov(rates.ts.all)
+nrz <- nrow(z)
+ncz <- ncol(z)
+# Create a function interpolating colors in the range of specified colors
+jet.colors <- colorRampPalette( c("blue", "green") )
+# Generate the desired number of colors from this palette
+nbcol <- 100
+color <- jet.colors(nbcol)
+# Compute the z-value at the facet centres
+zfacet <- z[-1, -1] + z[-1, -ncz] + z[-nrz, -1] + z[-nrz, -ncz]
+zfacet
+# Recode facet z-values into color indices
+facetcol <- cut(zfacet, nbcol)
+collabels <- colnames(rates.ts.all)
+persp(, , z, col = color[facetcol], phi = 30, theta = 30,ticktype="detailed",d=2)
+
+heatmap(z,symm=TRUE)
+}
+```
+
+
+## Principal Component Analysis
+
+In this section we use PCA to analyse the dataset to find potential types of trade. 
+
+The dataset comprises `r dim(rates)[1]` observations.
+The first observation is on `r dates[1]` and the last `r dates[dim(rates)[1]]`
+
+```{r setWindow}
+#Stage 4
+#If you only want to work with a subset of the data then define a test range
+#Make sure that you run the commented out lines to make the test range active!
+
+rm(helperfilepath,dataload,z,nrz,ncz,nbcol,color,zfacet,facetcol,collabels,rates.df,minday,maxday ) # delete used objects
+
+rates.df<- window(x=rates.ts.all,start=as.Date("2017-08-31"),end=as.Date("2020-09-18")) 
+minday <- min(index(rates.df)) 
+maxday <- max(index(rates.df))
+
+```
+
+For this exercise we restricted the analysis to the period `r min(index(rates.df))` through to `r max(index(rates.df))` 
+
+```{r, setNumPCAs, echo = FALSE, include= FALSE}
+number.of.PCA.factors.to.use <- 3
+
+```
+We set the number of variables to use in the principal component decomposition as `r number.of.PCA.factors.to.use`
+
+```{r}
+
+
+#pca <- prcomp(x=rates,centre=TRUE ,subset=tgt.set,scale=FALSE,retx=TRUE,tol=0.0001) # carries out the principal components analysis
+#use the rank variable to limit the number of Eigenvalues
+pca <- prcomp(x=rates.df,center=TRUE,scale=FALSE,retx=TRUE,tol=0.00001,rank=number.of.PCA.factors.to.use) # carries out the principal components analysis
+
+#Note the prcomp function does not return an xts object so you have to convert the x values into time series by attaching the dates on the original time series to the factor levels
+
+pca.ts<-xts(pca$x,order.by=index(rates.df))
+
+plot(pca.ts,main="All PCs", col=colours.for.barcharts)
+
+#plot(pca.ts[,2:number.of.PCA.factors.to.use],main="2nd +3rd PCAs",col=colours.for.barcharts[2:number.of.PCA.factors.to.use])
+#par(mfrow=c(3,1))
+plot(pca.ts[,1:1],main="1st PCA",col=colours.for.barcharts[1:1])
+plot(pca.ts[,2:2],main="2nd PCA",col=colours.for.barcharts[2:2])
+plot(pca.ts[,3:3],main="3rd PCA",col=colours.for.barcharts[3:3])
+#par(mfrow(c(1,1))
+
+#legend("bottom", legend=paste("Eig",2:number.of.PCA.factors.to.use),fill = colours.for.barcharts)
+```
+
+
+This shows a time series of the factors. If the first factor is extremely dominant then its scale will dwarf that of the other factors. For this reason it is worthwhile plotting the 2nd, 3rd factors separately. You are looking for values that have drifted a long way from their mean and which cross the axis a lot.
+
+
+
+### Testing the variables
+
+These rolling correlation plots show the correlations of the PCAs over different time periods. Check to see if the correlations are significantly higher than 1 especially on the PC1. Recall that PC1 is the beta component so a correlation that is meaningfuly different from 1 over the sub period means that your trade could be impacted by an unintended beta effect over the short term.
+
+```{r testsection, echo =FALSE}
+
+qtrpoint <- round(dim(rates.df)[1]/4)-1
+endpoint<-dim(rates.df)[1]
+
+number.of.observations<-dim(rates.df)[1]
+rolling.correlation.period<-round(number.of.observations/4)
+number.of.correls<-number.of.observations-rolling.correlation.period
+
+#rolling.correlation.matrix <- xts(matrix(NA,nrow=number.of.correls,3),order.by = dates[rolling.correlation.period:(rolling.correlation.period+number.of.correls-1)] )
+rolling.correlation.matrix <- xts(matrix(NA,nrow=number.of.correls,3),order.by =  index(rates.df)[rolling.correlation.period:(rolling.correlation.period+number.of.correls-1)] )
+
+#dim(rolling.correlation.matrix)
+#dates[number.of.correls:number.of.observations]
+for (i in 1:number.of.correls){
+#  rolling.correlation.matrix[i,1]<-cor(pca$x[(1+i):(i+rolling.correlation.period),])[1,2]
+#  rolling.correlation.matrix[i,2]<-cor(pca$x[(1+i):(i+rolling.correlation.period),])[1,3]
+#  rolling.correlation.matrix[i,3]<-cor(pca$x[(1+i):(i+rolling.correlation.period),])[2,3]
+
+  rolling.correlation.matrix[i,1]<-cor(pca.ts[(1+i):(i+rolling.correlation.period),])[1,2]
+  rolling.correlation.matrix[i,2]<-cor(pca.ts[(1+i):(i+rolling.correlation.period),])[1,3]
+  rolling.correlation.matrix[i,3]<-cor(pca.ts[(1+i):(i+rolling.correlation.period),])[2,3]
+  
+}
+
+par(mfrow=c(3,1))
+plot((rolling.correlation.matrix)[,1],type="l",col="red",ylab="Correlations",main="Rolling Correlation PCA1 vs PCA2",ylim=c(-1,1))
+grid()
+plot((rolling.correlation.matrix)[,2],type="l",col="blue",ylab="Correlations",main="Rolling Correlation PCA1 vs PCA3",ylim=c(-1,1))
+grid()
+plot((rolling.correlation.matrix)[,3],type="l",col="green",ylab="Correlations",main="Rolling Correlation PCA2 vs PCA3",ylim=c(-1,1))
+grid()
+#legend("topleft",legend=c("pca1 vs pca2","pca1 vs pca3","pca2 vs pca3"),col=c("red","blue","green"))
+#mtext("Correlations",side=2)
+```
+
+
+```{r}
+#summary(pca)$rotation
+```
+ 
+The scaled Eigenvalues chart shows what is driving the market. The first factor is largest and typically represents the 'beta' in some sense. For a yield curve it would be the average level of rates, for equity sector it is equity market beta, for vol it is the average vol level. 
+
+```{r}
+#STAGE 6
+#This plots the basic PCA charts 
+# i.e. factor loadings, time series exposures of instruments to factors
+# looking at the bottom chart decide which factor looks interesting
+
+#graphics.off() 
+#dev.new()
+#par(mfrow = c(3,1)) # splits the graphs sceen into 2 by 2## par(mfrow = c(1,1))
+#plot.eigen.values(pca)
+
+barplot(summary(pca)$importance[2,1:number.of.PCA.factors.to.use],col=colours.for.barcharts,ylab="% Variance Explained",main="Eigen Values",ylim=c(0,1.001))
+grid()
+```
+
+The % of variance explained by each factor is
+
+```{r}
+100*summary(pca)$importance[2,1:number.of.PCA.factors.to.use]
+```
+
+
+This chart shows the sensitivity of the various instruments to the factors. Ideally you want to see a clear structure in the factor behaviour. Something akin to level, slope, butterfly.  
+```{r}
+if((dim(rates.df)[2])>10){
+  graphtype<-"l"
+}   else{
+    graphtype<-"b"
+}
+
+#plot.factor.loadings2(pca,names(rates.df),graphtype) # the "b" makes it plot bars, switch it to l if you have a lot of data say 40 point on yield curve
+
+
+barplot(t(pca$rotation),beside=TRUE,col=colours.for.barcharts[1:number.of.PCA.factors.to.use],main="Factor Loadings")
+grid()
+
+```
+
+Care is needed here because there is no convention for the direction of Eigenvalues. Different programs may represent the direction of same Eigen vector in different ways. In order to avoid getting this wrong I show the change in the underlying variables for a 1 unit increase in the factor. 
+
+
+```{r} 
+#par(mfrow=c(2,1))
+ChartTitle<-"A 1 unit increase in the FIRST eigenvalue would cause"
+barplot(t(matrix(pca$rotation[,1],dimnames=list(rname=names(rates.df)))),col=colours.for.barcharts[1],main=ChartTitle)
+grid()
+ChartTitle<-"A 1 unit increase in the SECOND eigenvalue would cause"
+barplot(t(matrix(pca$rotation[,2],dimnames=list(rname=names(rates.df)))),col=colours.for.barcharts[2],main=ChartTitle)
+grid()
+
+
+
+ChartTitle<-"A 1 unit increase in the THIRD eigenvalue would cause"
+barplot(t(matrix(pca$rotation[,3],dimnames=list(rname=names(rates.df)))),col=colours.for.barcharts[3],main=ChartTitle)
+grid()
+``` 
+
+The above is just a restatement of the PCA rotation but it's helpful to remind yourself.
+
+
+```{r}
+#####plot.factor.time.series(pca,dates)
+```
+
+
+This analysis indicates how far the PCA factors are from their mean in SD units. 
+
+As at `r index(pca.ts)[dim(pca.ts)[1]]`
+
+Factor 1 = `r round((pca.ts[maxday,1]),3)` which is `r round((pca.ts[maxday,1]- mean( pca.ts[,1]) )/sd(pca.ts[,1]),1)` SDs away from its mean.
+
+Factor 2 = `r round((pca.ts[maxday,2]),3)` which is `r round((pca.ts[maxday,2]- mean( pca.ts[,2]) )/sd(pca.ts[,2]),1)` SDs away from its mean.
+
+Factor 3 =  `r round((pca.ts[maxday,3]),3)` which is `r round((pca.ts[maxday,3]- mean( pca.ts[,3]) )/sd(pca.ts[,3]),1)` SDs away from its mean.
+
+
+### Selecting an asset to trade
+`r TradeNum = 2 # set the number equal to the PCA factor what you want to trade`
+This section assumes that you want to trade PCA`r TradeNum`
+
+<!-- set the number of buckets for interval here-->
+`r numItv=20`
+
+The drift diagnostic below takes all the observations of PCA`r TradeNum` and groups them into `r numItv` equally spaced buckets. It then plots the average value of PCA`r TradeNum` on the xaxis and the average subsequent change on the y axis. Ideally what you want to see is a straight line with strong tendency for the variable to increase if it is below zero and strong tendency for the variable to decreaes if it is above zero. 
+
+This sort of diagnostic is helpful in fitting the Orstein Uhlenbeck Process (Vasicekprocess)
+
+$dr_t=a(b-r_t)dt +\sigma dW_t$
+
+The Vasicek process assumes that the only piece of information that is useful in calculating the change is the current value. It doesn't matter how you got there.
+
+```{r showdrift}
+#plot.variable.time.series(pca,2)
+#####plot.drift.coef.diagnostic(pca$x[,TradeNum],20)
+#plot.drift.coef.diagnostic <- function(time.series,numItv=11)
+###{
+#pca.ts[,TradeNum]
+time.series<- pca.ts[,TradeNum]
+numItv=11
+minVal<-min(time.series)
+maxVal<-max(time.series)
+
+interval.locations<-seq(minVal, maxVal, length.out=numItv+1) # creates a vector defining the end points of the intervals. Remember 10 intervals requires 11 points.
+
+difference.ts <- diff(time.series) # The diff command takes x(t)-x(t-1) and puts the result in row t
+difference.ts <- lag(difference.ts,k=-1) # the lag command shifts the time stamp index of the observations back one place
+time.series <- time.series[1:(nrow(time.series)-1)]
+difference.ts <- difference.ts[1:(nrow(difference.ts)-1)]
+
+#print(cbind(time.series ,lag(diff(time.series),k=-1)))
+interval.locations<-seq(minVal, maxVal, length.out=numItv+1) # creates a vector defining the end points of the intervals
+
+interval.in.which.observation.sits<-findInterval(x=time.series, vec=interval.locations)
+
+
+#write.csv(interval.locations,file="/media/john/6E34B3A529A1D545/Tools/DeleteAllHere/intervallocations.csv")
+
+#write.csv(cbind(time.series,difference.ts,interval.in.which.observation.sits),file="/media/john/6E34B3A529A1D545/Tools/DeleteAllHere/testdata2.csv")
+
+x<-tapply(X=time.series,INDEX=interval.in.which.observation.sits,FUN=mean)[2:(numItv-1)] # finds the middle of each range
+y<-tapply(X=difference.ts,INDEX=interval.in.which.observation.sits,FUN=mean)[2:(numItv-1)] # finds the middle of each range
+
+#write.csv(cbind(x,y,interval.locations),file="/media/john/6E34B3A529A1D545/Tools/DeleteAllHere/testdata3.csv")
+
+fit <- lm(y~x+0) # fits a straight line to the data and makes it pass through zero
+fit2 <- lm(y~x+I(x^2)+I(x^3)+0) # fits a cubic curve to the data and makes it pass through zero
+#fit3 <- lm(y~x+I(1/x)) # fits a straight line to the data and makes it pass through zero
+
+plot(x,y,main="Residual Diagnostic Chart",lwd=3,xlab="Time series buckets",ylab="Change in Time Series") # plots the diagnostic chart
+
+#plot(x,y,yaxs="r",xaxs="r",main="Residual Diagnostic Chart",lwd=3,xlab="Time series buckets",ylab="Change in Time Series",axes=FALSE) # plots the diagnostic chart
+grid(nx = NULL, ny = NULL, col = "lightgray", lty = "dotted", lwd = par("lwd"), equilogs = TRUE)
+axis(1, pos=0)
+axis(2, pos=0)
+abline(fit,lwd=3,col="RED")
+
+# This code adds the second regression model to the plot. Note that the prediction function can only take a dataframe as an argument so you need to coerce it
+lines(x,predict(fit2,as.data.frame(x)),lwd=3,col="BLUE")
+#lines(x,predict(fit3,as.data.frame(x)),col="GREEN")
+
+###}
+
+```
+
+This chart shows the expected path of the PCA `r TradeNum`. The chart below fits an ARIMA (2,0,0) model. This means that I am assuming period $x_t$ and $x_{t-1}$ are the only relevant factors for determining future values of x  
+
+```{r showfuturepath, echo=TRUE}
+##plot.ou.expected.path(pca$x[,TradeNum])
+##plot.forecast.OU.test(pca$x[,TradeNum],25)
+#plot.ou.expected.path(pca.ts[,TradeNum])
+##plot.forecast.OU.test(pca$x[,TradeNum],25)
+# start=c(2017,01,04),end=c(2020,05,29)
+#start=as.Date("2017-01-04"),end=as.Date("2020-05-31")
+#adf.test(pca.ts[,TradeNum])
+pca_in_ts_format<-as.ts(pca.ts[,TradeNum],start=as.Date("2017-01-04"),end=as.Date("2020-05-31"),deltat=1/861)
+
+#pca_in_ts_format
+arima.model<-forecast::auto.arima(x=pca.ts[,TradeNum],d=0,  max.p = 5, max.q=0)
+#arima.model<-forecast::auto.arima(x=pca_in_ts_format, d=0,  max.p = 2, max.q=0)
+
+summary(arima.model)
+#rates.df<- window(rates.ts.all,start=as.Date("2017-01-04"),end=as.Date("2020-05-31")) 
+
+#axis(1, at=seq(0, 80,10) , las=2, labels=seq(as.Date("2017-01-04"), as.Date("2020-05-31"+days(100), length.out=9) )
+#seq(from=as.Date("2017-01-04"), to=as.Date("2020-05-31" ), length.out=9)
+
+datelabels <- c(index(rates.df),tail(index(rates.df),100)+100)
+#datelabels
+
+
+forecast1<- forecast::forecast(arima.model,h=100)
+#forecast1$level = c(100*(1-1/(2^2)),100*(1-1/(3^2)))
+plot(forecast1,fan = TRUE,axes=FALSE, frame.plot=TRUE)
+grid()
+#axis(side =1, tick=TRUE,at=1:960,labels=datelabels)
+#axis(1, at=seq(0, 80,10) , las=2, labels=seq(as.Date("2017-01-04"), as.Date("2020-05-31"+days(100), length.out=9) )
+pca_factor<-TradeNum
+
+```
+
+### Hedge Ratios 
+Calculate the hedge ratios needed to isolate the factor you are interested in this example we want to hedge factor `r pca_factor`
+
+Remember that you wrote the hedging routine so that the first row shows the hedge ratios you should use if you don't care about the factors exposures with EigenValues values lower than theone you want to hedge. To put it another way if you don't care about butterfly then you can hedge slope with the first row. (This is probably OK if the percentage of risk explained for the lower value Eigenvalues is tiny.
+
+If you want to hedge the specific factor and you don't want any extraneous higher order factors then use the second row.)
+```{r hedgeratios, echo=FALSE}
+
+
+#####
+hedge.ratios<-calc.hedge.ratio(pca,pca_factor)
+hedge.ratios
+#tgt<-as.matrix(rates)%*%t(hedge.ratios[[1]])
+
+
+#fit.OU_exact(data.frame(pca$x[,2]),1)
+
+#last.value<-pca$x[length(array(pca$x[,pca_factor])),2]# a little inelegant but it gets last value!
+#last.value
+#fptd<-ou.hitting.time(tgt.value=0,stop.loss=last.value*2,max.sims=100,pca$x[,pca_factor])
+#apply(X=fptd,MARGIN=2,FUN=mean)
+
+
+#hedge.ratios[2,]/0.2621479
+
+#S<-data.frame(pca$x[,pca_factor])
+#fit.OU_exact(data.frame(pca$x[,pca_factor]),1)
+```
+## Independent Component Analysis
+This was added in response to the comment on page 72 of the Schaller book. About lack of examples of ICA used to evaluate markets. It is test code. It's interesting that the Independent Factors tendto be of similar size whereas the PCA factors tend to have more of the variance explained by the first factor
+```{r icaanalysis, include = TRUE, echo = TRUE}
+library(fastICA)
+a <- fastICA(rates.df, number.of.PCA.factors.to.use, alg.typ = "parallel", fun = "logcosh", alpha = 1, method = "R", row.norm = FALSE, maxit = 200, tol = 0.0001, verbose = TRUE)
+
+par(mfcol = c(1, number.of.PCA.factors.to.use))
+plot(1:number.of.observations, a$S[,1], type = "l", xlab = "S'1", ylab = "")
+points(1:number.of.observations, pca$x[,1], type = "l", xlab = "P'1", ylab = "",col="red")
+
+
+plot(1:number.of.observations, a$S[,2], type = "l", xlab = "S'2", ylab = "")
+points(1:number.of.observations, pca$x[,2], type = "l", xlab = "P'2", ylab = "",col="red")
+
+
+plot(1:number.of.observations, a$S[,3], type = "l", xlab = "S'3", ylab = "")
+points(1:number.of.observations, pca$x[,3], type = "l", xlab = "P'3", ylab = "",col="red")
+
+cor(a$S[,1],pca$x[,1])
+cor(a$S[,2],pca$x[,2])
+cor(a$S[,3],pca$x[,3])
+
+```
+## Trend Analysis
+Another interesting question is whether the variable of interest shows signs of trending. We explore this by fitting the ARMA model. The assumption is that vol is the same for the PCA at different levels of the underlying. This seems a reasonably safe assumption to make but it can be visually tested by plotting the rolling standard deviation.
+
+Question: The the variable exhibit stable volatility? The length of the time series is divided by 4 and this is used as the window for calculating rolling standard Deviations.
+
+```{r}
+number.of.observations<-dim(rates.df)[1]
+rolling.correlation.period<-round(number.of.observations/4)
+number.of.correls<-number.of.observations-rolling.correlation.period
+rolling.correlation.matrix <- matrix(NA,ncol=number.of.correls,3)
+
+for (i in 1:number.of.correls){
+  rolling.correlation.matrix[1,i]<-sd(pca$x[(1+i):(i+rolling.correlation.period),1])
+  rolling.correlation.matrix[2,i]<-sd(pca$x[(1+i):(i+rolling.correlation.period),2])
+  rolling.correlation.matrix[3,i]<-sd(pca$x[(1+i):(i+rolling.correlation.period),3])
+}
+#rbind(rolling.correlation.matrix[1,],rolling.correlation.matrix[2,],rolling.correlation.matrix[3,])
+
+par(mfrow=c(1,3))
+plot(t(rolling.correlation.matrix)[,1],type="line",col="red",ylab="St.Dev",main="Principal Component 1")
+plot(t(rolling.correlation.matrix)[,2],type="line",col="red",ylab="St.Dev",main="Principal Component 3")
+plot(t(rolling.correlation.matrix)[,3],type="line",col="red",ylab="St.Dev",main="Principal Component 3")
+```
+
+Question: Does the PCA in which we are interested have trends.
+```{r acf,echo=TRUE}
+acf(pca$x[,TradeNum])
+pacf(pca$x[,TradeNum])
+```
+These charts show the cross correlations. This can be helpful in determining if recent changes in 1 variable tend to bias the direction of another variable.
+```{r}
+ccf(pca$x[,1],pca$x[,2])
+ccf(pca$x[,1],pca$x[,3])
+```
+
+An alternative approach is to use discrete time ARIMA models.
+```{r ARIMAModelling}
+#pca.ts<-xts(pca$x[,TradeNum],order.by=dates)
+#pca.ts
+#autoplot(pca.ts)
+#fit<-model(arima=ARIMA(pca.ts))
+
+```
+

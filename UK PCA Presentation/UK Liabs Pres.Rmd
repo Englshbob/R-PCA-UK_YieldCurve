@@ -1,0 +1,573 @@
+---
+title: 'A PCA Approach to Hedging UK Pension Liabilities '
+author: "John St-Hill"
+date: "06/10/2020"
+output:
+  ioslides_presentation: default
+  beamer_presentation: default
+---
+
+
+```{r markdownsetup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(include = TRUE)
+knitr::opts_chunk$set(comment = NA)
+knitr::opts_chunk$set(message=FALSE)
+knitr::opts_chunk$set(warning=FALSE)
+
+require(xts)
+require(lubridate)
+require(forecast)
+require(readxl)
+require(prophet)
+
+colours.for.barcharts=c("red","blue","green","grey","pink","yellow","light blue","light green","black","dark blue","dark green")
+options(digits=2)
+```
+
+## UK DB Pension Market
+ - 10 Million Members
+ - 5436 DB Schemes left in UK (7751 in 2006) 
+ - £1.6tr in UK Pension Liabilities
+   - 26% Schemes have more than £100m Liabilities
+   - 5%  Schemes have more than £1bn  Liabilities
+
+<!--Source: PPF Purple Book 2019~ -->
+
+## DB Pension Scheme Risks
+ - Interest Rate
+ - Inflation
+ - Longevity
+    
+## History of Pension Fund Hedging
+ - Pre - 2000: Immunization:(Matched Duration, Asset Convexity > Liability Convexity) 
+    - ignores cost of convexity
+    - assumes parallel curve moves
+
+ - 2000 - 2020: PV01, IE01 buckets across curve
+    - ignores intra bucket volatility
+    - hedge is more complex
+  
+## Current Approaches
+ - Using the whole curve to discount liabilities
+   - Spurious accuracy
+ - Picking representative points on the curve
+   - Choice of points is arbitrary
+ - Liability Benchmark Portfolio (LBP)
+   - Convexity mismatch
+   - Credit spreads
+
+<!--
+
+## Method
+ - Generate covariance matrix (A) from daily BoE Yield spot yields
+ - Transform the covariance matrix ‘A’ into a set of orthogonal vectors.
+ - Find x: $A\overline x= \lambda \overline x$
+ - The  associated with the biggest  explains most of the yield curve variability
+ - Use the new $\overline x $ to describe the yield curve
+ - Look for patterns in the $\overline x $
+ - Test for mean reversion in the pattern.
+
+## Assumptions
+ - The sensitivity of the instruments to the factors are stable over the __estimation period__
+ - The sensitivity of the instruments to the factors are stable over the __forecast period__
+ - The market is characterised by linear combination of factors.
+-->
+
+## PCA Approach
+ - Assume that linear factor structure exists
+ - Assume factor loadings are stable
+ - Infer factors from data 
+
+```{r analysisSetup, include = FALSE}
+codeDirectory <- "/media/john/6E34B3A529A1D545/Presentation/R-PCA-UK_YieldCurve2/UK PCA Presentation" #This defines where the timeseries data is stored 
+dataDirectory <- "/media/john/6E34B3A529A1D545/Data" 
+reloadHistoricMonths=FALSE
+codeLoadYieldCurves <- paste(codeDirectory,"/","data preprocessing scripts.r",sep="")
+codeHelperFunctions <- paste(codeDirectory,"/","tools and functions 2020.r",sep="")
+
+#action <- "downloadallrealdata"
+action <- "downloadallnominaldata"
+#action <-"downloadallinflationdata"
+source(codeLoadYieldCurves)
+#source(codeHelperFunctions)
+```
+
+## UK Yield Curve
+```{r chgYieldCurve}
+
+startDate <- as.Date("2018-10-30")
+midDate   <- as.Date("2019-09-30")
+endDate   <- as.Date("2020-09-30")
+
+#window(x=rates.ts.all,start=startDate,end=startDate)
+#window(x=rates.ts.all,start=endDate,end=endDate)
+
+startCurve<- window(x=rates.ts.all,start=startDate,end=startDate)
+#t(startCurve)
+plot(x=t(startCurve),ylim=c(-1,7),type="l",ylab="Yield",xlab="Maturity",main="BoE Zero Coupon Yields",col=colours.for.barcharts[1],lty=1)
+
+midCurve  <- window(x=rates.ts.all,start=midDate  ,end=midDate)
+lines(t(midCurve),lty=2,col=colours.for.barcharts[2])
+
+endCurve  <- window(x=rates.ts.all,start=endDate  ,end=endDate)
+lines(t(endCurve),lty=3,col=colours.for.barcharts[3])
+
+grid()
+legend("topleft",legend=c(startDate,midDate,endDate),lty=1:3,col=colours.for.barcharts[1:3])
+
+```
+
+## Yield Correlation
+
+```{r exploredata,fig.height = 3.5, fig.width = 7}
+z<-cor(rates.ts.all,use="pairwise.complete.obs")
+library(corrplot)
+corrplot(z,method="shade",type="upper",tl.cex=0.5)
+```
+ 
+ - Darkest on diagonal and lightest in top right corner
+ - Adjacent maturities should have higher correlations
+
+
+```{r pca,fig.height = 4, fig.width = 7} 
+pca.startDate <- startDate
+pca.endDate   <- midDate
+
+#pca.startDate 
+#pca.endDate
+number.of.PCA.factors.to.use <- 3
+rates.df <- window(x=rates.ts.all,start=pca.startDate,end=pca.endDate) 
+
+pca      <- prcomp(x=rates.df,center=TRUE,scale=FALSE,retx=TRUE,tol=0.00001,rank=number.of.PCA.factors.to.use) # carries out the principal components analysis
+
+```
+
+## Interpretting the PCAs
+```{r factorLoadings, }
+par(mfrow=c(1,3))
+
+ChartTitle<-"PCA 1"
+barplot(t(matrix(pca$rotation[,1],dimnames=list(rname=names(rates.df)))),col=colours.for.barcharts[1],main=ChartTitle)
+grid()
+ChartTitle<-"PCA 2"
+barplot(t(matrix(pca$rotation[,2],dimnames=list(rname=names(rates.df)))),col=colours.for.barcharts[2],main=ChartTitle)
+grid()
+
+ChartTitle<-"PCA 3"
+barplot(t(matrix(pca$rotation[,3],dimnames=list(rname=names(rates.df)))),col=colours.for.barcharts[3],main=ChartTitle)
+grid()
+
+```
+
+
+
+## Principal Component Analysis
+```{r explainedRisk, fig.height = 4, fig.width = 7}
+x<-barplot(summary(pca)$importance[2,1:number.of.PCA.factors.to.use],col=colours.for.barcharts,ylab="% Variance Explained",main="Risk Explained by Principal Components",ylim=c(0,1.001))
+grid()
+
+#y<-as.matrix(summary(pca)$importance[2,1:number.of.PCA.factors.to.use])
+#text(x,y+2,labels=as.character(y))
+```
+
+PCA 1  | PCA 2 | PCA 3
+------------- | ------------- | ------------
+`r 100*summary(pca)$importance[2,1]` | `r 100*summary(pca)$importance[2,2]`|`r 100*summary(pca)$importance[2,3]`
+
+
+## Typical UK DB Scheme
+
+```{r liabCashFlowSimulation}
+actives    <-dnorm(x=seq(from=1,to=80, by=1),mean=30,sd=15)*20000
+deferreds  <-dnorm(x=seq(from=1,to=80, by=1),mean=30,sd=15)*10000
+pensioners <-dnorm(x=seq(from=1,to=80, by=1),mean=10,sd=15)*10000
+cf_profile <- data.frame(cbind(actives,deferreds,pensioners))
+par(mfrow=c(1,3))
+barplot(as.matrix(t(cf_profile)),main="Cash Flow Profile", xlab="Years",ylab="Expected Cash Flow", legend=c("actives","deferreds","pensionsers"),ylim =c(0,1000))
+
+axis(side=1,at=seq(from=0,to=80,by=10),labels=seq(from=0,to=80,by=10))
+expected_payments <- actives + deferreds + pensioners 
+#expected_payments 
+
+
+truncated_payments<- expected_payments[1:40]
+#truncated_payments
+
+
+truncated_payments[40]<-truncated_payments[40]+sum(expected_payments[41:80])
+#length(truncated_payments)
+#dim(as.matrix(truncated_payments))
+
+options(digits=5)
+barplot(as.matrix(t(truncated_payments)),main="Truncated Profile", xlab="Years",ylab="Expected Cash Flow", legend=c("All Members"),ylim =c(0,10000))
+axis(side=1,at=seq(from=0,to=40,by=5))
+barplot(main="Scheme Factor Loadings", ylab=("PCA 01"), t(t(pca$rotation)%*%truncated_payments))
+
+```
+
+## Building the hedge
+
+  - We know the factor loadings of the Scheme
+  - We know the factor loadings of each point on the yield curve
+      $\implies$ we know factor loading of each bond/swap
+  - Back out how much of each bond/swap we need to hedge the Scheme
+  
+## How have PCAs behaved
+```{r PCAs, fig.height = 4, fig.width =8}
+par(mfrow=c(2,2))
+pca.ts<-xts(pca$x,order.by=index(rates.df))
+plot(pca.ts,main="All PCs", col=colours.for.barcharts)
+
+plot(pca.ts[,1:1],main="1st PCA",col=colours.for.barcharts[1:1])
+plot(pca.ts[,2:2],main="2nd PCA",col=colours.for.barcharts[2:2])
+plot(pca.ts[,3:3],main="3rd PCA",col=colours.for.barcharts[3:3])
+
+```
+
+
+```{r}
+rates.df<- window(x=rates.ts.all,start=pca.startDate,end=pca.endDate) 
+maxday <- max(index(rates.df))
+```
+## Trade Ideas
+<!--As at `r index(pca.ts)[dim(pca.ts)[1]]` -->
+As at `r endDate`
+
+ .  | PCA 1 | PCA 2| PCA 3
+------------- | ------------- | ------------ | -------------
+Value  | `r round((pca.ts[maxday,1]),3)`  | `r round((pca.ts[maxday,2]),3)`|`r round((pca.ts[maxday,3]),3)`
+SDs from Mean | `r round((pca.ts[maxday,1]- mean( pca.ts[,1]) )/sd(pca.ts[,1]),1)`  | `r round((pca.ts[maxday,2]- mean( pca.ts[,2]) )/sd(pca.ts[,2]),1)` | `r round((pca.ts[maxday,3]- mean( pca.ts[,3]) )/sd(pca.ts[,3]),1)`
+
+<!--
+## Advantages of this Approach
+  - Risks to the Scheme can be summarised for Trustees
+  - Portfolio Managers can hedge efficiently and with confidence
+  - Past performance of PCAs can be used to identify possible future trades
+-->
+
+## Selecting an Asset to trade
+`r TradeNum = 2`
+  - Assume that you want to trade PCA`r TradeNum`
+
+<!--
+  - Group all observations of PCA2 and into 15 equally spaced buckets.
+  - Plot Average PCA2 vs average subsequent change in PCA2
+  - Ideally we want a decreasing straight line with negative slope 
+-->
+
+```{r showdrift}
+TradeNum = 2
+time.series <- pca.ts[,TradeNum]
+numItv=15
+minVal<-min(time.series)
+maxVal<-max(time.series)
+
+interval.locations<-seq(minVal, maxVal, length.out=numItv+1) # creates a vector defining the end points of the intervals. Remember 10 intervals requires 11 points.
+
+difference.ts <- diff(time.series) # The diff command takes x(t)-x(t-1) and puts the result in row t
+difference.ts <- lag(difference.ts,k=-1) # the lag command shifts the time stamp index of the observations back one place
+time.series <- time.series[1:(nrow(time.series)-1)]
+difference.ts <- difference.ts[1:(nrow(difference.ts)-1)]
+
+#print(cbind(time.series ,lag(diff(time.series),k=-1)))
+interval.locations<-seq(minVal, maxVal, length.out=numItv+1) # creates a vector defining the end points of the intervals
+
+interval.in.which.observation.sits<-findInterval(x=time.series, vec=interval.locations)
+
+#write.csv(interval.locations,file="/media/john/6E34B3A529A1D545/Tools/DeleteAllHere/intervallocations.csv")
+#write.csv(cbind(time.series,difference.ts,interval.in.which.observation.sits),file="/media/john/6E34B3A529A1D545/Tools/DeleteAllHere/testdata2.csv")
+
+x<-tapply(X=time.series,INDEX=interval.in.which.observation.sits,FUN=mean)[2:(numItv-1)] # finds the middle of each range
+y<-tapply(X=difference.ts,INDEX=interval.in.which.observation.sits,FUN=mean)[2:(numItv-1)] # finds the middle of each range
+
+#write.csv(cbind(x,y,interval.locations),file="/media/john/6E34B3A529A1D545/Tools/DeleteAllHere/testdata3.csv")
+
+fit <- lm(y~x+0) # fits a straight line to the data and makes it pass through zero
+fit2 <- lm(y~x+I(x^2)+I(x^3)+0) # fits a cubic curve to the data and makes it pass through zero
+#fit3 <- lm(y~x+I(1/x)) # fits a straight line to the data and makes it pass through zero
+
+xmin <- round(min(x)*0.8,0.2)
+xmax <- round(max(x)*1.2,0.2)
+plot(x,y,xlim=c(xmin,xmax), main="Drift Diagnostic Chart",lwd=3,xlab="Time series buckets",ylab="Change in Time Series") # plots the diagnostic chart
+
+
+grid(nx = NULL, ny = NULL, col = "lightgray", lty = "dotted", lwd = par("lwd"), equilogs = TRUE)
+axis(1, pos=0)
+axis(2, pos=0)
+abline(fit,lwd=3,col="RED")
+
+# This code adds the second regression model to the plot. Note that the prediction function can only take a dataframe as an argument so you need to coerce it
+lines(x,predict(fit2,as.data.frame(x)),lwd=3,col="BLUE")
+
+```
+
+## Forecasting
+
+  - Idea 1: Fit Orstein Uhlenbeck (Vasicek) Process
+    - Huggins and Schaller approach 
+    - assumes the only information that is useful in calculating the change is the current value.
+    - no trending away from mean
+    
+  - Idea 2: Fit Auto Regressive model, AR(p) 
+    - somewhat of a Blackbox
+    - allows for trending away from mean
+    - need to infer the order p, of the AR model
+
+## AR model
+This chart shows the expected path of the PCA `r TradeNum`. The chart below fits an AR model. 
+```{r showfuturepathDemo,, fig.height = 4, fig.width = 7}
+
+observationSet <- window(x=rates.ts.all,start=startDate,end=endDate)[,1]
+
+forecastHorizon <- dim(observationSet)[1]-dim(pca.ts)[1]
+
+includePeriod   <- dim(pca.ts)[1]
+
+#Here I fit an AR model with max order 5
+#there is some sort of name clash with one of my default packages
+#use forecast::to disambiguate
+
+arima.model<-forecast::auto.arima(pca.ts[,TradeNum], d=0, max.p = 10, max.q=0,trace=FALSE,approximation=FALSE,stepwise=FALSE)
+
+forecast1 <- forecast::forecast(object=arima.model,h=forecastHorizon)
+
+plot(x=forecast1,PI=TRUE,showgap=FALSE,include=includePeriod,xaxt="n")
+showObservations<-c(seq(from=1, to=includePeriod+forecastHorizon, by=40),includePeriod+forecastHorizon)
+showObservations<-seq(from=1, to=includePeriod+forecastHorizon, by=65)
+
+test<-(window(x=rates.ts.all,start=pca.startDate,end=endDate)) %*%( pca$rotation[,2])-2.5
+#print(mean(window(x=rates.ts.all,start=pca.startDate,end=midDate)) %*%( pca$rotation[,2]))
+
+axis(side=1, at=showObservations,las=2, labels=index(observationSet)[showObservations])
+#lines(window(x=rates.ts.all,start=pca.startDate,end=endDate) %*% pca$rotation[,2],col="green",lty=2)
+lines(test,col="green",lty=2)
+
+grid()
+
+#window(x=rates.ts.all,start=pca.startDate,end=endDate) %*% pca$rotation[,2]
+
+```
+
+## Vasicek Model
+SDE for Vasicek model : $dr_{t}= \kappa (\theta - r_t) + \sigma dW_t$
+```{r fitVasicekmodel}
+
+########################################################################################
+## maximimum likelihood method of parameterising the stochastic differential equation ##
+########################################################################################
+
+fit.OU_exact <- function (S,delta=1)
+{
+  S   <-  as.data.frame(S)
+  n   <-  dim(array(S))[1]-1
+  end <-  dim(array(S))[1]
+  S   <-  array(S[,1])
+  Sx  <- sum( S[1:(end-1)] )
+  Sy  <- sum( S[2:end] )
+  Sxx<- sum( S[1:(end-1)]^2 )
+  Sxy <- sum( S[1:(end-1)]*S[2:end] )
+  Syy <- sum( S[2:end]^2 )
+
+  mu  <- (Sy*Sxx - Sx*Sxy) / ( n*(Sxx - Sxy) - (Sx^2 - Sx*Sy) )
+  lambda <- -log( (Sxy - mu*Sx - mu*Sy + n*mu^2) / (Sxx -2*mu*Sx + n*mu^2) ) / delta
+  a <- exp(-lambda*delta)
+  sigmah2 <- (Syy - 2*a*Sxy + a^2*Sxx - 2*mu*(1-a)*(Sy - a*Sx) + n*mu^2*(1-a)^2)/n
+  sigma <- sqrt(sigmah2*2*lambda/(1-a^2))
+
+#print(list(mu,lambda,sigma))
+
+theta1<-lambda*mu
+half.life <- log(2) / lambda
+life.to90pct<- log(10) / lambda
+life.to99pct<- log(100) / lambda
+results<-list(mu=mu,lambda=lambda,sigma=sigma,theta1=theta1,theta2=lambda,theta3=sigma,half.life=half.life,life.to90pct=life.to90pct,life.to99pct=life.to99pct)
+
+#results<-data.frame(c(mu,lambda,sigma,theta1,half.life,life.to90pct))   # working code temporarily commented out
+#results<-list(mu=mu,lambda=lambda,sigma=sigma,theta1=theta1,theta2=lambda,theta3=sigma,half.life=half.life,life.to90pct=life.to90pct)
+#names(results)<-NULL # working code temporarily commented out
+#row.names(results)<-list("mu","lambda.theta2","sigma.theta3","theta1","half.life","life.to90pct") # working code temporarily commented out
+
+return(results)
+}
+
+
+
+##############################################################################
+## code for defining likelihood function for ornstein uhlenbeck function as defined by "sde" class NOTE theta1=mu*lambda,theta2=lambda,theta3=sigma
+##############################################################################
+
+ou.lik <- function(x) {
+  function(theta1,theta2,theta3) {
+    n <- length(x)
+    dt <- deltat(x)
+    -sum(dcOU(x=x[2:n], Dt=dt, x0=x[1:(n-1)],
+      theta=c(theta1,theta2,theta3), log=TRUE))
+  }
+}
+
+fit.vasicek<-function(spread)
+{
+  spread<-as.ts(spread)
+  ou.fit <- mle(ou.lik(spread),
+            start=list(theta1=0,theta2=0.0,theta3=0.00),
+            method="L-BFGS-B",lower=c(0,1e-5,1e-3), upper=c(1,1,1)
+            )
+  ou.coe <- coef(ou.fit)
+
+  lambda<-ou.coe[2]
+  mu<-ou.coe[1]/ou.coe[2]
+  sigma<-ou.coe[3]
+
+  theta1<-ou.coe[1]
+  theta2<-ou.coe[2]
+  theta3<-ou.coe[3]
+
+  half.life <- log(2) / lambda
+  life.to90pct<- log(10) / lambda
+  life.to99pct<- log(100) / lambda
+  results<-list(mu=mu,lambda=lambda,sigma=sigma,theta1=theta1,theta2=lambda,theta3=sigma,half.life=half.life,life.to90pct=life.to90pct,life.to99pct=life.to99pct)
+
+  return(results)
+
+}
+
+
+
+#########################################################################################################################################################################
+## Calculates forecasted future means for OU process
+#########################################################################################################################################################################
+
+
+ou.expected.value<-function(last.value,mu=1,lambda=1)
+{
+result<-last.value*exp(lambda*-1)+mu*(1-exp(lambda*-1)) #    expected value
+return(result)
+}
+
+
+#########################################################################################################################################################################
+## calculates standard deviation of variable for Orstein Uhlen beck process
+#########################################################################################################################################################################
+
+
+ou.std.dev<-function(steps.ahead=0,sigma,lambda)
+{
+sigma_SQD <- sigma^2 
+result<-sigma_SQD/2/lambda*(1-exp(lambda*-2*steps.ahead))
+return(result)
+}
+
+
+#########################################################################################################################################################################
+## forecasts confidence intervals for mean reverting OU process
+#########################################################################################################################################################################
+
+
+forecast.rangs.OU<-function(last.value_INT=0,steps.ahead=1,mu_INT,lambda_INT,sigma_INT)
+{
+expected.values<-array(rep(NA,steps.ahead))
+variances<-array(rep(NA,steps.ahead))
+
+expected.values[1]<-ou.expected.value(last.value=last.value_INT,mu=mu_INT,lambda=lambda_INT)
+variances[1]<-ou.std.dev(1,sigma=sigma_INT,lambda=lambda_INT)
+
+if(steps.ahead>1)
+	{
+		for (i in 2:steps.ahead)
+		{
+		expected.values[i] <- ou.expected.value(last.value=expected.values[i-1],mu=mu_INT,lambda=lambda_INT)
+		variances[i] <- ou.std.dev(i,sigma=sigma_INT,lambda=lambda_INT)
+		}
+	}
+
+#	expected.values<-expected.values-last.value_INT
+	standard.deviations<- sqrt(variances)
+	
+return(list(expected.values=expected.values,standard.deviations=standard.deviations))
+
+}
+
+
+#########################################################################################################################################################################
+## create charts for forecasting confidence intervals
+#########################################################################################################################################################################
+
+
+plot.forecast.OU<-function(historic.values,forecasted.values,std.dev)
+{
+
+num.hist.obs = length(as.array(historic.values))
+num.fcast.obs = length(as.array(forecasted.values))
+
+#last.value<-historic.values[num.hist.obs]
+
+hist.range=1:num.hist.obs
+fcast.range<-(num.hist.obs+1):(num.hist.obs+num.fcast.obs)
+
+hist.plot.vals<-array(NA,dim=num.hist.obs+num.fcast.obs)
+hist.plot.vals[hist.range]<-historic.values
+
+fcast.plot.vals<-array(NA,dim=num.hist.obs+num.fcast.obs)
+fcast.plot.vals[fcast.range]<-forecasted.values
+
+upper2sd.plot.vals<-array(NA,dim=num.hist.obs+num.fcast.obs)
+upper1sd.plot.vals<-array(NA,dim=num.hist.obs+num.fcast.obs)
+lower1sd.plot.vals<-array(NA,dim=num.hist.obs+num.fcast.obs)
+lower2sd.plot.vals<-array(NA,dim=num.hist.obs+num.fcast.obs)
+
+upper2sd.values<-forecasted.values+2*std.dev
+upper1sd.values<-forecasted.values+1*std.dev
+lower1sd.values<-forecasted.values-1*std.dev
+lower2sd.values<-forecasted.values-2*std.dev
+
+upper2sd.plot.vals[fcast.range]<-upper2sd.values
+upper1sd.plot.vals[fcast.range]<-upper1sd.values
+lower1sd.plot.vals[fcast.range]<-lower1sd.values
+lower2sd.plot.vals[fcast.range]<-lower2sd.values
+
+plot(hist.plot.vals, type = "l", col = "black", main = "Forecast Graph")
+points(fcast.plot.vals, type = "l",col = "red",lwd=3) # adds to the previous chart
+points(upper2sd.plot.vals, type = "l",col = "blue") # adds to the previous chart
+points(upper1sd.plot.vals, type = "l",col = "light blue") # adds to the previous chart
+points(lower2sd.plot.vals, type = "l",col = "blue") # adds to the previous chart
+points(lower1sd.plot.vals, type = "l",col = "light blue") # adds to the previous chart
+grid(nx = NULL, ny = NULL, col = "lightgray", lty = "dotted", lwd = par("lwd"), equilogs = TRUE)
+#legend("topleft", legend=c("Historic","Forecast","lower 2sd","lwr 1sd","upper 1sd","upper 2sd"),fill = c("black","red","dark blue","light blue","light blue","dark blue")
+}
+
+#########################################################################################################################################################################
+## create charts for forecasting confidence intervals
+#########################################################################################################################################################################
+
+#GB00B3MYD345
+
+plot.ou.expected.path<-function(timeseries)
+{
+ou.fit<-fit.OU_exact(timeseries)
+last.pca.value<-timeseries[length(array(timeseries))]
+
+fcast<-forecast.rangs.OU(last.value_INT=last.pca.value,steps.ahead=100,mu_INT=ou.fit$mu,lambda_INT=ou.fit$lambda,sigma_INT=ou.fit$sigma)
+plot.forecast.OU(timeseries,fcast$expected.values,fcast$standard.deviations)
+
+}
+
+plot.ou.expected.path(pca.ts[,TradeNum])
+#fit.OU_exact(data.frame(pca.ts[,TradeNum]),1)  
+```
+
+## Conclusions
+ - Benefits
+    - We can simplify the hedge
+    - We can identify tactical trading opportunities
+    - Challenge trade ideas after execution systematically
+
+ - Limitations/Further Research
+    - explaining approach to Trustees
+    - stability of factor loadings
+    - Converting ZC to real bonds
+    
+
+## Dataset
+Source: Bank of England daily nominal Zero Coupon Yields estimated using Nelsen Siebold Method.
+https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves/latest-yield-curve-data.zip
